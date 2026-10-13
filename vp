@@ -1,0 +1,18 @@
+#!/bin/bash
+
+# Definição de estilos
+BOLD="\e[1m"
+RESET="\e[0m"
+
+#Detetar opções inválidas
+if [[ ! "$1" == '-p' && ! "$1" == '-v' ]]; then
+	echo -e	""$1" é um switch inválido. Primeiro argumento: -p ou -v  
+		${BOLD}Uso${RESET}: ./vp [{-p <dir1[<dir2>...] | -c}] [-f <ficheiro>][-e <ignore_pattern>] [-s]
+		${BOLD}Protege${RESET} e guarda informação acerca de um ou mais diretórios
+		${BOLD}Verifica${RESET} alterações em ficheiros desde que foram protegidos
+		Indicação do nome do ficheiro onde a base de dados será guardada. (Por defeito será tmp/.pdb)
+		${BOLD}Permite${RESET} a exclusão de ficheiros voláteis (ex. *.tmp, *.log,/tmp/*) da proteção e verificação
+		Emissão de alertas de alta prioridade para o sistema de logging usando o ${BOLD}logger${REST}"
+else
+	echo "Nice"
+fi
