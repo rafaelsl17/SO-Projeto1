@@ -21,7 +21,7 @@ elif [[ "$1" == '-p' && "$2" == '-v' || "$1" == '-v' && "$2" == '-p' ]]; then
                 -v ${BOLD}verifica${RESET} alterações em ficheiros desde que foram protegidos"
         exit 2
 
-elif [ $# -eq 0 ]; then
+elif [[ $# -eq 0 || "$1" == '-v' ]]; then
         #MODO DE VERIFICAÇÃO 
         echo "A verificar..."
 fi
