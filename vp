@@ -4,36 +4,9 @@
 BOLD="\e[1m"
 RESET="\e[0m"
 
-#Detetar opções inválidas
-if [[ -n "$1" && ! "$1" == '-p' && ! "$1" == '-v' ]]; then
-        echo -e ""$1" é um switch inválido. Primeiro argumento: -p ou -v  
-                ${BOLD}Uso${RESET}: ./vp [{-p <dir1[<dir2>...] | -c}] [-f <ficheiro>][-e <ignore_pattern>] [-s]
-                ${BOLD}Protege${RESET} e guarda informação acerca de um ou mais diretórios
-                ${BOLD}Verifica${RESET} alterações em ficheiros desde que foram protegidos
-                Indicação do nome do ficheiro onde a base de dados será guardada. (Por defeito será tmp/.pdb)
-                ${BOLD}Permite${RESET} a exclusão de ficheiros voláteis (ex. *.tmp, *.log,/tmp/*) da proteção e verificação
-                Emissão de alertas de alta prioridade para o sistema de logging usando o ${BOLD}logger${RESET}"
-        exit 1
-
-elif [[ "$1" == '-p' && "$2" == '-v' || "$1" == '-v' && "$2" == '-p' ]]; then
-        echo -e "Não pode usar simultaneamente os switches -v e -p
-                -p ${BOLD}protege${RESET} e guarda informação acerca de um ou mais diretórios
-                -v ${BOLD}verifica${RESET} alterações em ficheiros desde que foram protegidos"
-        exit 2
-
-elif [[ $# -eq 0 || "$1" == '-v' ]]; then
-        #MODO DE VERIFICAÇÃO 
-        echo "A verificar..."
-fi
-#!/bin/bash
-
-# Definição de estilos
-BOLD="\e[1m"
-RESET="\e[0m"
-
 # Variáveis com valores por defeito
 MODE=""
-FILE="tmp/.pdb"
+FILE="/tmp/.pdb"
 IGNORE_PATTERN=""
 SYSLOG_FLAG=0
 
@@ -46,6 +19,26 @@ show_help() {
     -f      Indicação do nome do ficheiro onde a base de dados será guardada. (Por defeito será tmp/.pdb)
     -e      ${BOLD}Permite${RESET} a exclusão de ficheiros voláteis (ex. *.tmp, *.log,/tmp/*)
     -s      Emissão de alertas de alta prioridade para o sistema de logging"
+}
+
+# Função que recebe uma lista de ficheiros e guarda-os na base de dados
+processar_ficheiros() {
+    # O while read vai ler o ficheiro que vier do 'find'
+    while read -r ficheiro; do
+
+        # para cada ficheiro usamos stat,só uma vez, para extrair tudo, onde:
+        # %U = Dono, %G = Grupo, %s = Tamanho, %a = Permissões em octal
+        # O comando read distribui os 4 resultados logo pelas 4 variaveis
+        read user group size perm <<< $(stat -c "%U %G %s %a" "$ficheiro")
+        
+        # Calcular o Hash SHA256 (256bits hash table) 
+        hash=$(sha256sum "$ficheiro" | awk '{print $1}')
+        
+        # guardar na base de dados ($FILE) com a formatação correta
+        echo "$ficheiro Informação atual: USER=$user, GROUP=$group, SIZE=$size, PERM=$perm, SHA256=$hash" >> "$FILE"
+        
+        echo "A processar: $ficheiro"
+    done
 }
 
 # A string "pvf:e:s" define os switches aceites. 
@@ -91,7 +84,9 @@ done
 # Deixa apenas os argumentos soltos (ex: a lista de diretórios) na variável $@
 shift $((OPTIND -1))
 
-# Execução baseada na configuração extraída
+
+#----------------------------------------------------------------------------------
+
 if [[ "$MODE" == "p" ]]; then
     if [[ $# -eq 0 ]]; then
         echo "Erro: O modo de proteção (-p) requer pelo menos um diretório."
@@ -100,6 +95,31 @@ if [[ "$MODE" == "p" ]]; then
     echo "A proteger os diretórios: $@"
     echo "Ficheiro DB: $FILE"
     
+    echo "Diretorios protegidos: $@" > "$FILE"
+
+    # ter a certeza que o que está em $@ é uma diretoria
+    for DIR in "$@"; do
+
+        if [[ ! -d "$DIR" ]]; then
+            echo "Aviso: '$DIR' não é um diretório válido. A ignorar."
+            exit 2
+        fi
+
+        # O comando 'find' passa pela diretoria atual ($DIR) à procura de ficheiros (-type f).
+        # e dá como argumento para a função esses mesmos ficheiros através do '|'
+        # O comando '! -name "$IGNORE_PATTERN"' serve para ignorar ficheiros de um tipo especificado na variável $IGNORE_PATTERN 
+
+        if [[ -n "$IGNORE_PATTERN" ]]; then
+            # Se a variável de ignorar não estiver vazia, fazemos o find completo
+            find "$DIR" -type f ! -name "$IGNORE_PATTERN" | processar_ficheiros
+        else
+            # Se não houver ignor_pattern, fazemos o find simples
+            find "$DIR" -type f | processar_ficheiros
+        fi
+
+    done
+    echo "Base de dados $FILE criada com sucesso."
+
 elif [[ -z "$MODE" || "$MODE" == "v" ]]; then
     # MODO DE VERIFICAÇÃO (Por defeito ou com -v)
     echo "A verificar..."
