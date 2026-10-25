@@ -25,3 +25,83 @@ elif [[ $# -eq 0 || "$1" == '-v' ]]; then
         #MODO DE VERIFICAÇÃO 
         echo "A verificar..."
 fi
+#!/bin/bash
+
+# Definição de estilos
+BOLD="\e[1m"
+RESET="\e[0m"
+
+# Variáveis com valores por defeito
+MODE=""
+FILE="tmp/.pdb"
+IGNORE_PATTERN=""
+SYSLOG_FLAG=0
+
+# Função para mostrar o menu de ajuda
+show_help() {
+    echo -e "Opção inválida ou incompleta.
+    ${BOLD}Uso${RESET}: ./vp [-p <dir1... > | -v] [-f <ficheiro>] [-e <ignore_pattern>] [-s]
+    -p      ${BOLD}Protege${RESET} e guarda informação acerca de um ou mais diretórios
+    -v      ${BOLD}Verifica${RESET} alterações em ficheiros desde que foram protegidos
+    -f      Indicação do nome do ficheiro onde a base de dados será guardada. (Por defeito será tmp/.pdb)
+    -e      ${BOLD}Permite${RESET} a exclusão de ficheiros voláteis (ex. *.tmp, *.log,/tmp/*)
+    -s      Emissão de alertas de alta prioridade para o sistema de logging"
+}
+
+# A string "pvf:e:s" define os switches aceites. 
+# Os ":" à frente do f e do e indicam que precisam de um argumento a seguir.
+while getopts ":pvf:e:s" opt; do
+    case ${opt} in
+        p ) 
+            if [[ "$MODE" == "v" ]]; then
+                echo -e "Não pode usar simultaneamente os switches -v e -p"
+                exit 2
+            fi
+            MODE="p"
+            ;;
+        v ) 
+            if [[ "$MODE" == "p" ]]; then
+                echo -e "Não pode usar simultaneamente os switches -v e -p"
+                exit 2
+            fi
+            MODE="v"
+            ;;
+        f ) 
+            FILE="$OPTARG" # OPTARG guarda o argumento passado após o -f
+            ;;
+        e ) 
+            IGNORE_PATTERN="$OPTARG"
+            ;;
+        s ) 
+            SYSLOG_FLAG=1
+            ;;
+        \? ) # Opção não reconhecida
+            show_help
+            exit 1
+            ;;
+        : )  # Faltou o argumento para uma opção (ex: usou -f mas não indicou o ficheiro)
+            echo "A opção -$OPTARG requer um argumento."
+            show_help
+            exit 1
+            ;;
+    esac
+done
+
+# Remove os argumentos processados pelo getopts (as flags)
+# Deixa apenas os argumentos soltos (ex: a lista de diretórios) na variável $@
+shift $((OPTIND -1))
+
+# Execução baseada na configuração extraída
+if [[ "$MODE" == "p" ]]; then
+    if [[ $# -eq 0 ]]; then
+        echo "Erro: O modo de proteção (-p) requer pelo menos um diretório."
+        exit 1
+    fi
+    echo "A proteger os diretórios: $@"
+    echo "Ficheiro DB: $FILE"
+    
+elif [[ -z "$MODE" || "$MODE" == "v" ]]; then
+    # MODO DE VERIFICAÇÃO (Por defeito ou com -v)
+    echo "A verificar..."
+    echo "Ficheiro DB a ler: $FILE"
+fi
