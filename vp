@@ -1,16 +1,16 @@
 #!/bin/bash
 
-# Definição de estilos
+# Definição de estilos ANSI
 BOLD="\e[1m"
 RESET="\e[0m"
 
 # Variáveis com valores por defeito
-MODE=""
-FILE="/tmp/.pdb"
+MODE="" 
+FILE="~/.pdb"
 IGNORE_PATTERN=""
 SYSLOG_FLAG=0
 
-# Função para mostrar o menu de ajuda
+# Menu de ajuda
 show_help() {
     echo -e "Opção inválida ou incompleta.
     ${BOLD}Uso${RESET}: ./vp [-p <dir1... > | -v] [-f <ficheiro>] [-e <ignore_pattern>] [-s]
@@ -21,7 +21,7 @@ show_help() {
     -s      Emissão de alertas de alta prioridade para o sistema de logging"
 }
 
-# Função que recebe uma lista de ficheiros e guarda-os na base de dados
+# Recebe uma lista de ficheiros e guarda-os na base de dados
 processar_ficheiros() {
     # O while read vai ler o ficheiro que vier do 'find'
     while read -r ficheiro; do
@@ -54,7 +54,7 @@ while getopts ":pvf:e:s" opt; do
             ;;
         v ) 
             if [[ "$MODE" == "p" ]]; then
-                echo -e "Não pode usar simultaneamente os switches -v e -p"
+                echo -e "Não pode usar simultaneamente os switches -p e -v"
                 exit 2
             fi
             MODE="v"
@@ -95,7 +95,7 @@ if [[ "$MODE" == "p" ]]; then
     echo "A proteger os diretórios: $@"
     echo "Ficheiro DB: $FILE"
     
-    echo "Diretorios protegidos: $@" > "$FILE"
+    echo "Diretorios protegidos: $*" > "$FILE"
 
     # ter a certeza que o que está em $@ é uma diretoria
     for DIR in "$@"; do
@@ -106,14 +106,14 @@ if [[ "$MODE" == "p" ]]; then
         fi
 
         # O comando 'find' passa pela diretoria atual ($DIR) à procura de ficheiros (-type f).
-        # e dá como argumento para a função esses mesmos ficheiros através do '|'
+        # e dá como argumento para a função processar_ficehiros esses mesmos ficheiros através do pipe.
         # O comando '! -name "$IGNORE_PATTERN"' serve para ignorar ficheiros de um tipo especificado na variável $IGNORE_PATTERN 
 
         if [[ -n "$IGNORE_PATTERN" ]]; then
             # Se a variável de ignorar não estiver vazia, fazemos o find completo
             find "$DIR" -type f ! -name "$IGNORE_PATTERN" | processar_ficheiros
         else
-            # Se não houver ignor_pattern, fazemos o find simples
+            # Se não houver ignore_pattern, fazemos o find simples
             find "$DIR" -type f | processar_ficheiros
         fi
 
@@ -121,7 +121,8 @@ if [[ "$MODE" == "p" ]]; then
     echo "Base de dados $FILE criada com sucesso."
 
 elif [[ -z "$MODE" || "$MODE" == "v" ]]; then
-    # MODO DE VERIFICAÇÃO (Por defeito ou com -v)
+    # MODO DE VERIFICAÇÃO (Por omissão ou com -v)
     echo "A verificar..."
     echo "Ficheiro DB a ler: $FILE"
 fi
+
