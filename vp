@@ -84,13 +84,28 @@ if [[ "$MODE" == "p" ]]; then
     echo "Base de dados $FILE criada com sucesso."
 
 elif [[ -z "$MODE" || "$MODE" == "v" ]]; then
-    # MODO DE VERIFICAÇÃO (Exemplo 4)
     if [[ ! -f "$FILE" ]]; then
         echo "Erro: Ficheiro de base de dados '$FILE' não encontrado."
         exit 1
     fi
 
-    # Ler os diretórios protegidos (primeira linha do ficheiro DB)
+    # Devolve a informação atual de um ficheiro (mesmo formato do modo de proteção)
+    obter_info() {
+        read user group size perm <<< $(stat -c "%U %G %s %a" "$1")
+        hash=$(sha256sum "$1" | awk '{print $1}')
+        echo "USER=$user, GROUP=$group, SIZE=$size, PERM=$perm, SHA256=$hash"
+    }
+
+    # Lista os ficheiros de um diretório (com ou sem ignore pattern, como no modo de proteção)
+    listar_ficheiros() {
+        if [[ -n "$IGNORE_PATTERN" ]]; then
+            find "$1" -type f ! -name "$IGNORE_PATTERN"
+        else
+            find "$1" -type f
+        fi
+    }
+
+    # Diretórios protegidos (primeira linha do ficheiro)
     read -r linha1 < "$FILE"
     dirs_protegidos=${linha1#"Diretorios protegidos: "}
 
@@ -99,14 +114,12 @@ elif [[ -z "$MODE" || "$MODE" == "v" ]]; then
     apagado=0
     novo=0
 
-    # Ficheiro temporário com a lista de ficheiros na base de dados (para usar na verificação de novos)
+    # Ficheiro temporário com os ficheiros da base de dados (para detetar os novos)
     lista_db=$(mktemp)
 
-    # 1. Verificar Modificados e Apagados (lendo do DB, saltando a primeira linha com tail)
-    while read -r linha; do
-        # Separar o nome do ficheiro e a informação original guardada
-        ficheiro=$(echo "$linha" | awk '{print $1}')
-        info_inicial=${linha#*Informação atual: }
+    # 1. Modificados e apagados (lê a base de dados, saltando a primeira linha)
+    while read -r ficheiro resto; do
+        info_inicial=${resto#Informação atual: }
         echo "$ficheiro" >> "$lista_db"
 
         if [[ ! -f "$ficheiro" ]]; then
@@ -115,24 +128,18 @@ elif [[ -z "$MODE" || "$MODE" == "v" ]]; then
             echo "    Informação atual:     [Ficheiro não encontrado no sistema]"
             echo "--------------------------------------------------------------------------------"
             ((apagado++))
-            ((verificados++))
         else
-            # O ficheiro existe, extrair a informação atual
-            read user group size perm <<< $(stat -c "%U %G %s %a" "$ficheiro")
-            hash=$(sha256sum "$ficheiro" | awk '{print $1}')
-            info_atual="USER=$user, GROUP=$group, SIZE=$size, PERM=$perm, SHA256=$hash"
+            info_atual=$(obter_info "$ficheiro")
 
-            # Se a informação for diferente, foi modificado
             if [[ "$info_inicial" != "$info_atual" ]]; then
-                # Identificação básica do que alterou
+                # Separa os campos da informação inicial (1) e atual (2)
+                IFS=', ' read -r user1 group1 size1 perm1 hash1 <<< "$info_inicial"
+                IFS=', ' read -r user2 group2 size2 perm2 hash2 <<< "$info_atual"
+
                 motivo=""
-                [[ "$info_inicial" != *"USER=$user"* || "$info_inicial" != *"GROUP=$group"* ]] && motivo="Posse"
-                if [[ "$info_inicial" != *"SHA256=$hash"* || "$info_inicial" != *"SIZE=$size"* ]]; then
-                    motivo="${motivo:+$motivo e }Conteúdo"
-                fi
-                if [[ "$info_inicial" != *"PERM=$perm"* ]]; then
-                    motivo="${motivo:+$motivo e }Permissões"
-                fi
+                [[ "$user1" != "$user2" || "$group1" != "$group2" ]] && motivo="Posse"
+                [[ "$size1" != "$size2" || "$hash1" != "$hash2" ]] && motivo="${motivo:+$motivo e }Conteúdo"
+                [[ "$perm1" != "$perm2" ]] && motivo="${motivo:+$motivo e }Permissões"
 
                 echo "$ficheiro foi MODIFICADO (Alteração de $motivo)"
                 echo "    Informação inicial:   $info_inicial"
@@ -140,32 +147,25 @@ elif [[ -z "$MODE" || "$MODE" == "v" ]]; then
                 echo "--------------------------------------------------------------------------------"
                 ((modificado++))
             fi
-            ((verificados++))
         fi
+        ((verificados++))
     done < <(tail -n +2 "$FILE")
 
-    # 2. Verificar Ficheiros Novos (pesquisando nas diretorias originais)
+    # 2. Novos (procura nos diretórios protegidos ficheiros que não estão na base de dados)
     for d in $dirs_protegidos; do
         if [[ -d "$d" ]]; then
-            # Utilizar o comando find com ou sem ignore pattern
             while read -r f; do
-                if ! grep -q "^$f$" "$lista_db"; then
-                    read user group size perm <<< $(stat -c "%U %G %s %a" "$f")
-                    hash=$(sha256sum "$f" | awk '{print $1}')
-                    info_atual="USER=$user, GROUP=$group, SIZE=$size, PERM=$perm, SHA256=$hash"
-
+                if ! grep -qxF "$f" "$lista_db"; then
                     echo "$f é NOVO"
-                    echo "    Informação atual:     $info_atual"
+                    echo "    Informação atual:     $(obter_info "$f")"
                     echo "--------------------------------------------------------------------------------"
                     ((novo++))
                 fi
-            done < <( if [[ -n "$IGNORE_PATTERN" ]]; then find "$d" -type f ! -name "$IGNORE_PATTERN"; else find "$d" -type f; fi )
+            done < <(listar_ficheiros "$d")
         fi
     done
 
-    # Limpar o ficheiro temporário
     rm -f "$lista_db"
 
-    # Resumo Final da Verificação
     echo "Resumo da Verificação: $verificados verificados | $modificado Modificado | $apagado Apagado | $novo Novo"
 fi
