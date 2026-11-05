@@ -15,7 +15,7 @@ show_help() {
     echo -e "Uso: $0 [-p <dir1...> | -v] [-f <ficheiro>] [-e <ignore_pattern>] [-s]
     -p      ${BOLD}Protege${RESET} e guarda informação acerca de um ou mais diretórios
     -v      ${BOLD}Verifica${RESET} alterações em ficheiros desde que foram protegidos
-    -f      Indicação do nome do ficheiro onde a base de dados será guardada. (Por defeito será /tmp/.pdb)
+    -f      Indicação do nome do ficheiro onde a base de dados será guardada. (Por defeito será $HOME/.pdb)
     -e      ${BOLD}Permite${RESET} a exclusão de ficheiros voláteis (ex. *.tmp, *.log,/tmp/*) da proteção e verificação
     -s      Emissão de alertas de alta prioridade para o sistema de logging usando o logger"
 }
@@ -35,8 +35,11 @@ processar_ficheiros() {
         
         # Aplica o padrão de exclusão (se existir)
         if [[ -n "$IGNORE_PATTERN" ]]; then
+            # Extrai apenas o nome do ficheiro sem o caminho todo
+            nome_ficheiro=$(basename "$ficheiro")
+            
             # Verifica o caminho completo ou apenas o nome do ficheiro
-            if [[ "$ficheiro" == $IGNORE_PATTERN || "${ficheiro##*/}" == $IGNORE_PATTERN ]]; then
+            if [[ "$ficheiro" == $IGNORE_PATTERN || "$nome_ficheiro" == $IGNORE_PATTERN ]]; then
                 continue
             fi
         fi
@@ -207,7 +210,11 @@ elif [[ "$MODE" == "v" ]]; then
                 
                 # Exclusão de voláteis
                 if [[ -n "$IGNORE_PATTERN" ]]; then
-                    if [[ "$f" == $IGNORE_PATTERN ]]; then
+                    # Extrai apenas o nome do ficheiro sem o caminho todo
+                    nome_ficheiro=$(basename "$f")
+                    
+                    # Verifica o caminho completo ou apenas o nome do ficheiro
+                    if [[ "$f" == $IGNORE_PATTERN || "$nome_ficheiro" == $IGNORE_PATTERN ]]; then
                         continue
                     fi
                 fi
