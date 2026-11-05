@@ -10,162 +10,224 @@ FILE="$HOME/.pdb"
 IGNORE_PATTERN=""
 SYSLOG_FLAG=0
 
-# Menu de ajuda
+# Menu de ajuda e uso correto
 show_help() {
-    echo -e "Opção inválida ou incompleta.
-    ${BOLD}Uso${RESET}: ./vp [-p <dir1... > | -v] [-f <ficheiro>] [-e <ignore_pattern>] [-s]
+    echo -e "Uso: $0 [-p <dir1...> | -v] [-f <ficheiro>] [-e <ignore_pattern>] [-s]
     -p      ${BOLD}Protege${RESET} e guarda informação acerca de um ou mais diretórios
     -v      ${BOLD}Verifica${RESET} alterações em ficheiros desde que foram protegidos
-    -f      Indicação do nome do ficheiro onde a base de dados será guardada. (Por defeito será tmp/.pdb)
-    -e      ${BOLD}Permite${RESET} a exclusão de ficheiros voláteis (ex. *.tmp, *.log,/tmp/*)
-    -s      Emissão de alertas de alta prioridade para o sistema de logging"
+    -f      Indicação do nome do ficheiro onde a base de dados será guardada. (Por defeito será /tmp/.pdb)
+    -e      ${BOLD}Permite${RESET} a exclusão de ficheiros voláteis (ex. *.tmp, *.log,/tmp/*) da proteção e verificação
+    -s      Emissão de alertas de alta prioridade para o sistema de logging usando o logger"
+}
+
+# Envia alertas para o syslog se a flag -s foi ativada
+send_syslog() {
+    if [[ $SYSLOG_FLAG -eq 1 ]]; then
+        logger -p auth.alert -t vp -- "$1"
+    fi
 }
 
 # Recebe uma lista de ficheiros e guarda-os na base de dados
 processar_ficheiros() {
     while read -r ficheiro; do
-        read user group size perm <<< $(stat -c "%U %G %s %a" "$ficheiro")
+        # Ignora a própria base de dados de ser inspecionada
+        if [[ "$ficheiro" -ef "$FILE" ]]; then continue; fi
+        
+        # Aplica o padrão de exclusão (se existir)
+        if [[ -n "$IGNORE_PATTERN" ]]; then
+            # Verifica o caminho completo ou apenas o nome do ficheiro
+            if [[ "$ficheiro" == $IGNORE_PATTERN || "${ficheiro##*/}" == $IGNORE_PATTERN ]]; then
+                continue
+            fi
+        fi
+
+        # Extrai metadados, adicionando %Y para a data de modificação
+        read user group size perm mtime <<< $(stat -c "%U %G %s %a %Y" "$ficheiro")
         hash=$(sha256sum "$ficheiro" | awk '{print $1}')
-        echo "$ficheiro Informação atual: USER=$user, GROUP=$group, SIZE=$size, PERM=$perm, SHA256=$hash" >> "$FILE"
-        echo "A processar: $ficheiro"
+        
+        echo "$ficheiro Informação atual: USER=$user, GROUP=$group, SIZE=$size, PERM=$perm, MTIME=$mtime, SHA256=$hash" >> "$FILE"
     done
 }
 
+# Processamento de Opções (getopts)
 while getopts ":pvf:e:s" opt; do
     case ${opt} in
         p ) 
             if [[ "$MODE" == "v" ]]; then
-                echo -e "Não pode usar simultaneamente os switches -v e -p"
-                exit 2
+                echo "Erro: Não pode usar simultaneamente os switches -p e -v"
+                show_help; exit 1
             fi
             MODE="p"
             ;;
         v ) 
             if [[ "$MODE" == "p" ]]; then
-                echo -e "Não pode usar simultaneamente os switches -p e -v"
-                exit 2
+                echo "Erro: Não pode usar simultaneamente os switches -p e -v"
+                show_help; exit 1
             fi
             MODE="v"
             ;;
         f ) FILE="$OPTARG" ;;
         e ) IGNORE_PATTERN="$OPTARG" ;;
         s ) SYSLOG_FLAG=1 ;;
-        \? ) show_help; exit 1 ;;
+        \? ) echo "Opção inválida: -$OPTARG"; show_help; exit 1 ;;
         : )  echo "A opção -$OPTARG requer um argumento."; show_help; exit 1 ;;
     esac
 done
 
 shift $((OPTIND -1))
 
-#----------------------------------------------------------------------------------
+# Por defeito, o comando deverá ser executado no modo de verificação
+if [[ -z "$MODE" ]]; then
+    MODE="v"
+fi
 
+#----------------------------------------------------------------------------------
+# MODO DE PROTEÇÃO
+#----------------------------------------------------------------------------------
 if [[ "$MODE" == "p" ]]; then
     if [[ $# -eq 0 ]]; then
         echo "Erro: O modo de proteção (-p) requer pelo menos um diretório."
-        exit 1
+        show_help; exit 1
     fi
-    echo "A proteger os diretórios: $@"
-    echo "Ficheiro DB: $FILE"
     
-    echo "Diretorios protegidos: $*" > "$FILE"
-
+    # Validar se os diretórios introduzidos são reais
     for DIR in "$@"; do
         if [[ ! -d "$DIR" ]]; then
-            echo "Aviso: '$DIR' não é um diretório válido. A ignorar."
-            exit 2
-        fi
-
-        if [[ -n "$IGNORE_PATTERN" ]]; then
-            find "$DIR" -type f ! -name "$IGNORE_PATTERN" | processar_ficheiros
-        else
-            find "$DIR" -type f | processar_ficheiros
+            echo "Erro: '$DIR' não é um diretório válido."
+            show_help; exit 1
         fi
     done
-    echo "Base de dados $FILE criada com sucesso."
 
-elif [[ -z "$MODE" || "$MODE" == "v" ]]; then
+    # Criar/Sobrescrever base de dados guardando configurações nas primeiras 2 linhas
+    echo "Pattern: $IGNORE_PATTERN" > "$FILE"
+    echo "Diretorios: $*" >> "$FILE"
+
+    # Envia os ficheiros encontrados para a função que processa e guarda
+    for DIR in "$@"; do
+        find "$DIR" -type f | processar_ficheiros
+    done
+    
+    # Calcula o número de ficheiros guardados (descontando o cabeçalho de 2 linhas)
+    total_ficheiros=$(($(wc -l < "$FILE") - 2))
+    
+    echo "Base de dados de proteção $FILE criada com sucesso."
+    echo "Ficheiros processados: $total_ficheiros | Diretórios protegidos: $*"
+
+#----------------------------------------------------------------------------------
+# MODO DE VERIFICAÇÃO
+#----------------------------------------------------------------------------------
+elif [[ "$MODE" == "v" ]]; then
     if [[ ! -f "$FILE" ]]; then
-        echo "Erro: Ficheiro de base de dados '$FILE' não encontrado."
-        exit 1
+        echo "Erro: Ficheiro com a base de dados '$FILE' não encontrado."
+        show_help; exit 1
     fi
 
-    # Devolve a informação atual de um ficheiro (mesmo formato do modo de proteção)
+    # Função simples para gerar a string de um ficheiro atual para comparar com a BD
     obter_info() {
-        read user group size perm <<< $(stat -c "%U %G %s %a" "$1")
+        read user group size perm mtime <<< $(stat -c "%U %G %s %a %Y" "$1")
         hash=$(sha256sum "$1" | awk '{print $1}')
-        echo "USER=$user, GROUP=$group, SIZE=$size, PERM=$perm, SHA256=$hash"
+        echo "USER=$user, GROUP=$group, SIZE=$size, PERM=$perm, MTIME=$mtime, SHA256=$hash"
     }
 
-    # Lista os ficheiros de um diretório (com ou sem ignore pattern, como no modo de proteção)
-    listar_ficheiros() {
-        if [[ -n "$IGNORE_PATTERN" ]]; then
-            find "$1" -type f ! -name "$IGNORE_PATTERN"
-        else
-            find "$1" -type f
-        fi
-    }
+    # Lê as duas primeiras linhas da BD para recuperar as definições
+    {
+        read -r linha1
+        read -r linha2
+    } < "$FILE"
+    
+    db_pattern=${linha1#"Pattern: "}
+    dirs_protegidos=${linha2#"Diretorios: "}
 
-    # Diretórios protegidos (primeira linha do ficheiro)
-    read -r linha1 < "$FILE"
-    dirs_protegidos=${linha1#"Diretorios protegidos: "}
+    # Se não foi passado -e na linha de comandos, usa o da base de dados
+    if [[ -z "$IGNORE_PATTERN" ]]; then
+        IGNORE_PATTERN="$db_pattern"
+    fi
 
     verificados=0
     modificado=0
     apagado=0
     novo=0
 
-    # Ficheiro temporário com os ficheiros da base de dados (para detetar os novos)
-    lista_db=$(mktemp)
+    # Usar um dicionário para gurdar os ficheiros que já foram verficados
+    declare -A ficheiros_verificados
 
-    # 1. Modificados e apagados (lê a base de dados, saltando a primeira linha)
+    linha_atual=0
+
+    # 1. Modificados e apagados (Lê a BD e usa o contador para ignorar o cabeçalho)
     while read -r ficheiro resto; do
+        ((linha_atual++))
+        
+        # Se estiver nas linhas 1 ou 2 (o cabeçalho), ignora e passa à próxima iteração
+        if [[ $linha_atual -le 2 ]]; then
+            continue
+        fi
+
         info_inicial=${resto#Informação atual: }
-        echo "$ficheiro" >> "$lista_db"
+        
+        # Guarda o ficheiro no dicionário em memória
+        ficheiros_verificados["$ficheiro"]=1
 
         if [[ ! -f "$ficheiro" ]]; then
             echo "$ficheiro foi APAGADO"
             echo "    Informação inicial:   $info_inicial"
             echo "    Informação atual:     [Ficheiro não encontrado no sistema]"
             echo "--------------------------------------------------------------------------------"
+            send_syslog "Ficheiro APAGADO: $ficheiro"
             ((apagado++))
         else
             info_atual=$(obter_info "$ficheiro")
 
+            # Verifica se os metadados ou hash sofreram alterações
             if [[ "$info_inicial" != "$info_atual" ]]; then
-                # Separa os campos da informação inicial (1) e atual (2)
-                IFS=', ' read -r user1 group1 size1 perm1 hash1 <<< "$info_inicial"
-                IFS=', ' read -r user2 group2 size2 perm2 hash2 <<< "$info_atual"
+                IFS=', ' read -r user1 group1 size1 perm1 mtime1 hash1 <<< "$info_inicial"
+                IFS=', ' read -r user2 group2 size2 perm2 mtime2 hash2 <<< "$info_atual"
 
                 motivo=""
                 [[ "$user1" != "$user2" || "$group1" != "$group2" ]] && motivo="Posse"
                 [[ "$size1" != "$size2" || "$hash1" != "$hash2" ]] && motivo="${motivo:+$motivo e }Conteúdo"
                 [[ "$perm1" != "$perm2" ]] && motivo="${motivo:+$motivo e }Permissões"
+                [[ "$mtime1" != "$mtime2" ]] && motivo="${motivo:+$motivo e }Data de modificação"
 
                 echo "$ficheiro foi MODIFICADO (Alteração de $motivo)"
                 echo "    Informação inicial:   $info_inicial"
                 echo "    Informação atual:     $info_atual"
                 echo "--------------------------------------------------------------------------------"
+                send_syslog "Ficheiro MODIFICADO ($motivo): $ficheiro"
                 ((modificado++))
             fi
         fi
         ((verificados++))
-    done < <(tail -n +2 "$FILE")
+    done < "$FILE"
 
-    # 2. Novos (procura nos diretórios protegidos ficheiros que não estão na base de dados)
+    # 2. Novos (Procura nos diretórios originais por ficheiros que não constem no dicionário)
     for d in $dirs_protegidos; do
         if [[ -d "$d" ]]; then
             while read -r f; do
-                if ! grep -qxF "$f" "$lista_db"; then
+                if [[ "$f" -ef "$FILE" ]]; then continue; fi
+                
+                # Exclusão de voláteis
+                if [[ -n "$IGNORE_PATTERN" ]]; then
+                    if [[ "$f" == $IGNORE_PATTERN ]]; then
+                        continue
+                    fi
+                fi
+
+                # Verifica de forma super rápida se o ficheiro NÃO está no dicionário
+                if [[ -z "${ficheiros_verificados["$f"]}" ]]; then
                     echo "$f é NOVO"
                     echo "    Informação atual:     $(obter_info "$f")"
                     echo "--------------------------------------------------------------------------------"
+                    send_syslog "Ficheiro NOVO: $f"
                     ((novo++))
                 fi
-            done < <(listar_ficheiros "$d")
+            done < <(find "$d" -type f)
         fi
     done
 
-    rm -f "$lista_db"
-
     echo "Resumo da Verificação: $verificados verificados | $modificado Modificado | $apagado Apagado | $novo Novo"
+    
+    # Dispara log global caso alguma anomalia seja detetada
+    if (( modificado + apagado + novo > 0 )); then
+        send_syslog "Resumo da Verificação: $verificados verificados | $modificado Modificado | $apagado Apagado | $novo Novo"
+    fi
 fi
