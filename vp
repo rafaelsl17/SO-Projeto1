@@ -53,31 +53,44 @@ processar_ficheiros() {
 }
 
 # Processamento de Opções (getopts)
-while getopts ":pvf:e:s" opt; do
-    case ${opt} in
-        p ) 
-            if [[ "$MODE" == "v" ]]; then
-                echo "Erro: Não pode usar simultaneamente os switches -p e -v"
-                show_help; exit 1
-            fi
-            MODE="p"
-            ;;
-        v ) 
-            if [[ "$MODE" == "p" ]]; then
-                echo "Erro: Não pode usar simultaneamente os switches -p e -v"
-                show_help; exit 1
-            fi
-            MODE="v"
-            ;;
-        f ) FILE="$OPTARG" ;;
-        e ) IGNORE_PATTERN="$OPTARG" ;;
-        s ) SYSLOG_FLAG=1 ;;
-        \? ) echo "Opção inválida: -$OPTARG"; show_help; exit 1 ;;
-        : )  echo "A opção -$OPTARG requer um argumento."; show_help; exit 1 ;;
-    esac
+# O getopts pára no primeiro argumento que não é uma opção (ex.: um diretório).
+# Por isso, o ciclo exterior guarda esse argumento em DIRS e volta a chamar o
+# getopts, para que as opções possam vir depois dos diretórios
+# (ex.: ./vp -p dir1 dir2 -e "*.log").
+DIRS=()
+while (( OPTIND <= $# )); do
+    while getopts ":pvf:e:s" opt; do
+        case ${opt} in
+            p ) 
+                if [[ "$MODE" == "v" ]]; then
+                    echo "Erro: Não pode usar simultaneamente os switches -p e -v"
+                    show_help; exit 1
+                fi
+                MODE="p"
+                ;;
+            v ) 
+                if [[ "$MODE" == "p" ]]; then
+                    echo "Erro: Não pode usar simultaneamente os switches -p e -v"
+                    show_help; exit 1
+                fi
+                MODE="v"
+                ;;
+            f ) FILE="$OPTARG" ;;
+            e ) IGNORE_PATTERN="$OPTARG" ;;
+            s ) SYSLOG_FLAG=1 ;;
+            \? ) echo "Opção inválida: -$OPTARG"; show_help; exit 1 ;;
+            : )  echo "A opção -$OPTARG requer um argumento."; show_help; exit 1 ;;
+        esac
+    done
+    # Argumento que não é opção: é um diretório
+    if (( OPTIND <= $# )); then
+        DIRS+=("${!OPTIND}")
+        ((OPTIND++))
+    fi
 done
 
-shift $((OPTIND -1))
+# Os diretórios passam a ser os parâmetros posicionais ($@)
+set -- "${DIRS[@]}"
 
 # Por defeito, o comando deverá ser executado no modo de verificação
 if [[ -z "$MODE" ]]; then
