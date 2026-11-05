@@ -114,7 +114,10 @@ if [[ "$MODE" == "p" ]]; then
         fi
     done
 
-    # Criar/Sobrescrever base de dados guardando configurações nas primeiras 2 linhas
+    # Remove a BD anterior (pode estar read-only, e o > não escreve em ficheiros 400)
+    rm -f "$FILE"
+
+    # Criar base de dados guardando configurações nas primeiras 2 linhas
     echo "Pattern: $IGNORE_PATTERN" > "$FILE"
     echo "Diretorios: $*" >> "$FILE"
 
@@ -123,6 +126,9 @@ if [[ "$MODE" == "p" ]]; then
         find "$DIR" -type f | processar_ficheiros
     done
     
+    # Torna a BD só de leitura (apenas o dono pode ler) para evitar adulteração
+    chmod 400 "$FILE"
+
     # Calcula o número de ficheiros guardados (descontando o cabeçalho de 2 linhas)
     total_ficheiros=$(($(wc -l < "$FILE") - 2))
     
