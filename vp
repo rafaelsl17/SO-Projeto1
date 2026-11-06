@@ -44,8 +44,8 @@ processar_ficheiros() {
             nome_ficheiro=$(basename "$ficheiro")
             
             # Compara o padrão de exclusão com o caminho completo do ficheiro($ficheiro) e
-            # também com o nome final (usando o basename), fazendo com que o utilizador
-            # possa escrever o caminho completo ou só um padrão global (ex: *.log)
+            # com o nome final (usando o basename), fazendo com que o utilizador
+            # possa escrever o caminho completo ou só o basename
             # 'continue' salta o ficheiro se estiver certo
             if [[ "$ficheiro" == $IGNORE_PATTERN || "$nome_ficheiro" == $IGNORE_PATTERN ]]; then
                 continue
@@ -138,8 +138,7 @@ if [[ "$MODE" == "p" ]]; then
         find "$DIR" -type f | processar_ficheiros
     done
     
-    # Torna a BD só de leitura (apenas o dono pode ler)
-    # (evita corrupção de dados)
+    # Torna a BD só de leitura (apenas o dono pode ler), evitando corrupção de dados
     chmod 400 "$FILE"
 
     # Calcula o número de ficheiros guardados (descontando o cabeçalho de 2 linhas)
@@ -156,7 +155,7 @@ elif [[ "$MODE" == "v" ]]; then
         show_help; exit 1
     fi
 
-    # Função simples para gerar a string de um ficheiro atual para comparar com a BD
+    # Função para gerar a string de um ficheiro atual para comparar com a BD
     obter_info() {
         read user group size perm mtime <<< $(stat -c "%U %G %s %a %Y" "$1")
         hash=$(sha256sum "$1" | awk '{print $1}')
